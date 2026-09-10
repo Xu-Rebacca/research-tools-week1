@@ -1,0 +1,7 @@
+Data security and privacy protection is an important course.
+Git is a distributed version control system.
+Codex is an AI assisted programming tool.
+LaTeX is a document preparation system for scientific reports.
+Git GitHub Codex LaTeX are common research tools.
+We use Git to manage code and LaTeX to write reports.
+Data security privacy protection research tools make experiments reproducible.
