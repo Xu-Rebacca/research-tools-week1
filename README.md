@@ -14,4 +14,4 @@
 python code/demo.py sample.txt
 ```
 
-> 该行由 GitHub 网页端修改，用于练习 git pull 同步。
+> 该行由 GitHub 网页端修改，用于练习 git pull 同步。（修复编码后重新提交）
