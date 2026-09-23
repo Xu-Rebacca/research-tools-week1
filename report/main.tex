@@ -130,7 +130,7 @@ AI 编程工具 & Codex CLI & 0.154.0（npm 全局安装）\\
 \end{tabular}
 \end{table}
 
-实验仓库创建于本地，采用 \texttt{git init -b main} 初始化，远程仓库以本地裸仓库（\texttt{git init --bare}）模拟 GitHub 远程，操作流程与真实 GitHub 一致；Codex 任务由于网络环境限制（详见第 4 节），在配置国内供应商后即可完成。
+实验仓库创建于本地，采用 \texttt{git init -b main} 初始化，远程仓库以本地裸仓库（\texttt{git init --bare}）模拟 GitHub 远程，操作流程与真实 GitHub 一致；Codex 在线任务通过 CC Switch 切换到国内可直连的 DeepSeek 供应商后完成（详见第 4.3 节），最终代码与报告均推送至真实 GitHub 仓库。
 
 \section{实验过程}
 
@@ -331,16 +331,22 @@ $ codex --version
 codex-cli 0.154.0
 \end{lstlisting}
 
-\subsubsection{登录和检查状态}
+\subsubsection{登录与供应商配置}
 
-在项目目录中使用 \texttt{codex login status} 检查登录状态。登录方式可选择 ChatGPT 登录或 API Key 登录；若使用 API Key，应把密钥放入环境变量并通过标准输入登录，\textbf{不要把密钥写进实验报告、Git 仓库、截图或配置文件}。本实验中登录凭据已配置（此处省略密钥内容，防止泄露）。
+本实验采用 CC Switch v3.20.1 的 config-only 模式完成登录配置：供应商信息（端点、模型、密钥）写入 Codex 配置文件 \texttt{\textasciitilde/.codex/config.toml} 的 \texttt{[model\_providers.custom]} 表中，不再生成 \texttt{auth.json}。Codex 启动时自动读取该配置，如下所示（密钥内容不在本报告展示，防止泄露）：
 
-\begin{lstlisting}[caption={检查 Codex 登录状态}]
-$ codex login status
-Logged in using an API key - sk-proj-***（密钥已脱敏）
+\begin{lstlisting}[caption={Codex 启动时的供应商与模型配置}]
+OpenAI Codex v0.153.4
+--------
+model: deepseek-v4-flash
+provider: custom
+approval: never
+sandbox: read-only
+reasoning effort: high
+--------
 \end{lstlisting}
 
-\subsubsection{尝试执行 Codex 任务}
+\subsubsection{连接官方端点失败与排查}
 
 按照实验要求，先让 Codex 阅读项目并说明目录结构，再要求其完成词频统计程序的编写。在尝试连接官方端点时，出现如下错误：
 
@@ -375,7 +381,98 @@ $ Start-Process portable/cc-switch.exe
     \item 关闭并重新打开 Codex 或终端，使新的供应商和模型列表生效，再用 \texttt{/status} 和一个小问题进行验证。
 \end{enumerate}
 
-\textbf{说明：}由于 API Key 由用户自行持有（且实验要求不得泄露），供应商切换为 GUI 手动操作步骤；本报告提交时，Codex 在线编程任务因网络与供应商配置尚未完成，待配置国内供应商后即可按 4.3 节步骤完成词频统计程序任务并补充运行结果。
+启动后界面默认包含 “OpenAI Official”（官方端点）与 “default”（未配置）两个条目。本实验在 cc-switch 中新建 DeepSeek 自定义供应商并启用：Endpoint 填写 \texttt{https://api.deepseek.com}，模型选择 \texttt{deepseek-v4-flash}，API Key 由用户在供应商平台创建并粘贴（密钥仅保存在本地配置中，不在本报告展示）。启用后 Codex 配置文件同步更新为 \texttt{model\_providers.custom}（config-only 模式，见 4.3.2 节）。
+
+先验证供应商端点与密钥可用（密钥以环境变量传入，避免出现在命令历史中）：
+
+\begin{lstlisting}[caption={验证 DeepSeek 供应商端点}]
+$ curl -s -H "Authorization: Bearer $env:DSKEY" \
+    https://api.deepseek.com/v1/models
+{"object":"list","data":[
+  {"id":"deepseek-flash","name":"DeepSeek-V4.1-Flash",...},
+  {"id":"deepseek-v4-pro","name":"DeepSeek-V4-Pro",...}]}
+# HTTP 200：端点连通、密钥有效
+\end{lstlisting}
+
+\subsubsection{任务一：Codex 只读分析项目}
+
+配置完成后重新运行 Codex，要求其只读分析项目：
+
+\begin{lstlisting}[caption={Codex 任务一：只读分析项目}]
+$ codex exec "请先阅读项目，说明目录结构、程序入口和运行方法，不要修改任何文件。"
+\end{lstlisting}
+
+Codex 自动扫描仓库并给出结论：目录结构为 \texttt{README.md / code/(demo.py, sample.txt) / result/ / report/(LaTeX 工程)}；程序入口为 \texttt{code/demo.py}（\texttt{load\_text} 读文件、\texttt{count\_words} 正则分词计数、\texttt{main} 打印 Top-N），运行命令 \texttt{python code/demo.py code/sample.txt 10}；报告需在 \texttt{report/} 目录下用 XeLaTeX 连续编译两次。此外 Codex 还发现了两个值得注意的问题：README 快速开始命令 \texttt{python code/demo.py sample.txt} 从仓库根目录执行会因路径不存在而报错（正确应为 \texttt{code/sample.txt}）；\texttt{reference.bib} 尚未被 \texttt{main.tex} 引用，属于预留文件。由于仓库位于 WPS 云盘同步目录，Git 提示 “dubious ownership”（沙箱用户与文件属主不同），Codex 使用一次性 \texttt{-c safe.directory=...} 参数只读绕过，未写入任何全局配置。
+
+\subsubsection{任务二：Codex 生成词频统计程序}
+
+继续要求 Codex 编写独立的词频统计程序：
+
+\begin{lstlisting}[caption={Codex 任务二：生成词频统计程序}]
+$ codex exec "在 code/ 目录编写一个独立的文本词频统计程序 text_stats.py，
+支持命令行参数（输入文本文件路径，可选 top N 参数默认 10），读取 UTF-8 文本，
+统计英文单词出现次数并按频率降序输出 Top-N。只创建 code/text_stats.py。"
+\end{lstlisting}
+
+Codex 生成了完整程序（只依赖标准库，使用 \texttt{argparse} 解析参数，正则允许单词内部连字符与撇号），并因只读沙箱无法直接落盘而输出完整代码供保存；人工审阅其代码与待执行命令后，将代码保存为 \texttt{code/text_stats.py}：
+
+\begin{lstlisting}[language=Python, caption={Codex 生成的 text_stats.py（节选）}]
+import argparse, re, sys
+from collections import Counter
+
+WORD_PATTERN = re.compile(r"[A-Za-z]+(?:['\-][A-Za-z]+)*")
+
+def count_words(text: str) -> Counter:
+    return Counter(WORD_PATTERN.findall(text.lower()))
+
+def ranking(counter: Counter, top_n: int):
+    # 按次数降序、同次数按字母升序，保证输出稳定
+    return sorted(counter.items(), key=lambda x: (-x[1], x[0]))[:top_n]
+\end{lstlisting}
+
+按 Codex 给出的测试方法实际运行，结果如下（正常路径、边界、异常四组）：
+
+\begin{lstlisting}[caption={text_stats.py 测试结果}]
+$ python code/text_stats.py code/sample.txt          # 默认 Top-10
+文件: code/sample.txt
+总词数: 60, 不同单词数: 40
+出现频率最高的前 10 个单词
+----------------------------------------
+is                        4  6.67%
+git                       3  5.00%
+latex                     3  5.00%
+...
+
+$ python code/text_stats.py tmp_words.txt -n 3        # 边界：大小写/撇号/连字符
+文件: tmp_words.txt
+总词数: 8, 不同单词数: 5
+world                     3  37.50%
+hello                     2  25.00%
+e-mail                    1  12.50%
+
+$ python code/text_stats.py no_such_file.txt          # 异常：文件不存在
+错误: 找不到文件 no_such_file.txt    （退出码 2）
+$ python code/text_stats.py code/sample.txt -n -1     # 异常：负数
+text_stats.py: error: top N 不能为负数    （退出码 2）
+\end{lstlisting}
+
+默认 Top-10 结果与 \texttt{demo.py} 输出交叉验证一致（总词数 60、不同单词 40，最高频 \texttt{is} 出现 4 次占 6.67\%），边界与异常用例均符合预期，退出码正确。
+
+随后用 Git 独立检查 Codex 的修改：\texttt{git status} 确认仅有 \texttt{code/text_stats.py} 一个新增文件，审阅 \texttt{git diff} 无误后提交并推送真实 GitHub 远程：
+
+\begin{lstlisting}[caption={Git 复核并提交推送}]
+$ git status
+Untracked files:
+	code/text_stats.py
+$ git add code/text_stats.py
+$ git commit -m "add text_stats.py generated by Codex with tests"
+[main 2cda0fb] add text_stats.py generated by Codex with tests
+ 1 file changed, 96 insertions(+)
+$ git push github main
+   8cf6bb6..2cda0fb  main -> main
+\end{lstlisting}
+
+至此，“Codex 完成至少一次任务（代码阅读、生成或修改）”的要求已全部完成：任务一完成代码阅读与分析，任务二完成程序生成、测试验证与提交推送。
 
 \section{实验总结}
 
@@ -384,8 +481,8 @@ $ Start-Process portable/cc-switch.exe
 \begin{enumerate}
     \item \textbf{Git 与 GitHub}：掌握了仓库初始化（\texttt{git init}）、暂存与提交（\texttt{add/commit}）、历史查看（\texttt{log}）、远程同步（\texttt{push/pull}）的完整流程，养成了“开始工作先 pull，修改后看 status 和 diff，确认后 add、commit，结束再 push”的固定节奏。实验中通过本地裸仓库模拟了 GitHub 远程操作，流程与真实远程完全一致；还实践了“一次提交一个清晰目标、提交说明用动词”等良好习惯。
     \item \textbf{LaTeX 图片规范}：掌握了 \texttt{graphicx}、\texttt{figure} 环境、\texttt{caption} 图题与 \texttt{label/ref} 交叉引用的用法，并实际将词频统计结果导出为 PDF 矢量图插入报告，理解并践行了“优先使用矢量图、避免低分辨率截图”的原则。
-    \item \textbf{AI 辅助编程工具}：完成了 Codex CLI 的安装与配置，理解其“权限确认—命令审阅—运行测试—Git 复核”的可靠使用流程；安装了 CC Switch 并了解了供应商配置与切换方法。由于当前网络无法连接官方端点，Codex 在线任务待配置国内供应商后完成，这也让我认识到科研工具使用中网络环境与镜像/中转配置的重要性。
-    \item \textbf{遇到的问题与解决}：① 官方端点连接失败——通过切换国内供应商解决；② Windows 下 Git 的 LF/CRLF 换行符警告——属正常现象，不影响功能；③ 脚本写入 README 导致中文乱码——统一使用 UTF-8 编码并修复提交；④ PowerShell 控制台中文路径乱码——设置 \texttt{chcp 65001} 与 UTF-8 输出编码解决。
+    \item \textbf{AI 辅助编程工具}：完成了 Codex CLI 的安装与配置，理解并实践了其“权限确认—命令审阅—运行测试—Git 复核”的可靠使用流程；通过 CC Switch 将供应商切换为国内可直连的 DeepSeek，成功完成“项目只读分析”和“生成词频统计程序并测试”两项任务，并提交推送至真实 GitHub 仓库。过程中还认识到：外网不可达时，合理配置国内模型供应商/中转是保证科研工具可用的有效途径。
+    \item \textbf{遇到的问题与解决}：① 官方端点连接失败——通过 CC Switch 切换国内供应商（DeepSeek）解决；② DeepSeek 旧密钥失效（401）——在供应商平台重新创建密钥并更新配置后解决；③ Windows 下 Git 的 LF/CRLF 换行符警告——属正常现象，不影响功能；④ 脚本写入 README 导致中文乱码——统一使用 UTF-8 编码并修复提交；⑤ PowerShell 控制台中文路径乱码——设置 \texttt{chcp 65001} 与 UTF-8 输出编码解决。
 \end{enumerate}
 
 总体而言，本次实验为后续课程的代码管理与实验报告撰写打下了规范基础，我将在后续实验中保持“可复现、可追溯、规范保存”的习惯。
